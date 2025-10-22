@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
                 printf("Byte received: 0x%02X\n", received_buf[i]);
             }
 
-            if ((received_buf[3] != 0x00) && (received_buf[3] == (received_buf[1] ^ received_buf[2]))) alarmCount = 3;
+            if ((received_buf[3] != 0x00) && (received_buf[3] == (received_buf[1] ^ received_buf[2]))) {alarmCount = 3; printf("Connection established.\n");}
             else {
                 printf("Frame received with errors\n");
             }
