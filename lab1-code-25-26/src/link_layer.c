@@ -11,8 +11,7 @@
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
-    // TODO: Implement this function
-
+    openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate);
     return 0;
 }
 
@@ -21,8 +20,7 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO: Implement this function
-
+    writeBytesSerialPort(buf, bufSize);
     return 0;
 }
 
@@ -31,8 +29,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO: Implement this function
-
+    readByteSerialPort(packet);
     return 0;
 }
 
@@ -41,7 +38,6 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose()
 {
-    // TODO: Implement this function
-
+    closeSerialPort();
     return 0;
 }
