@@ -4,12 +4,15 @@
 #include "link_layer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 
 static int startTransmission(const char *filename);
-static int startReception(const char *filename);
+//static int startReception(const char *filename);
 static FILE* openFile(const char *filename, const char *mode);
 static long getFileSize(FILE *file);
-static unsigned char buildControlpkg(unsigned char controlType, const char *filename, long fileSize);
+static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize);
 
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
@@ -18,24 +21,25 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     LinkLayer config  = {
         .baudRate = baudRate,
         .nRetransmissions = nTries,
-        .role = role,
-        .serialPort = serialPort,
+        .role = strcmp(role,"tx") == 0 ? LlTx : LlRx,
         .timeout = timeout,
     };
+    strcpy(config.serialPort, serialPort);
     
-    if (llopen(config) < 0) {
+    /*if (llopen(config) < 0) {
         perror("Erro ao abrir a conexão\n");
         exit(-1);
-    }
+    }*/
 
-    if (role == "tx") {
+    printf("Choosing transmission mode...\n");
+    if (config.role == LlTx) {
         startTransmission(filename);
     }
-    else if (role == "rx") {
+    else if (config.role == LlRx) {
         //start reception
     }
 
-    llclose();
+    //llclose();
 }
 
 
@@ -51,10 +55,15 @@ static int startTransmission(const char *filename) {
     long fileSize = getFileSize(file);
 
     // Envia o start packet
+
+    printf("Enviando start packet...\n");
+
     if(sendControlPacket(0x02, filename, fileSize) < 0) {
         perror("Erro ao enviar o start packet");
         return 1;
     }
+
+   
 
     ///////////////////////////////////
     // Implementar ciclo while que cria e envia pacotes
@@ -62,6 +71,8 @@ static int startTransmission(const char *filename) {
 
 
     // Envia o end packet
+
+    printf("Enviando end packet...\n");
     if(sendControlPacket(0x03, filename, fileSize) < 0) {
         perror("Erro ao enviar o end packet");
         return 1;
@@ -73,10 +84,10 @@ static int startTransmission(const char *filename) {
 }
 
 
-static int startReception(const char *filename) {
+/*static int startReception(const char *filename) {
     // Implementar a recepção
     return 0;
-}
+}*/
 
 static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize) {
     int filenameSize = strlen(filename);
@@ -101,10 +112,12 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
 
     index += filenameSize;
 
-    if (llwrite(packet, index) < 0) {
+    /*if (llwrite(packet, index) < 0) {
         free(packet);
         return -1;
-    }
+    }*/
+
+    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
 
     free(packet);
     return 0;
