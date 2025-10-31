@@ -43,4 +43,10 @@ int llread(unsigned char *packet);
 // Return 0 on success or -1 on error.
 int llclose();
 
+unsigned char getBCC2(const unsigned char *buf, int bufSize);
+
+int byteStuffing(const unsigned char *input, int length, unsigned char *output);
+
+int byteDeStuffing(const unsigned char *input, int length, unsigned char *output);
+
 #endif // _LINK_LAYER_H_

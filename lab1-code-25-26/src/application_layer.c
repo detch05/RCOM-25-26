@@ -112,10 +112,10 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
 
     index += filenameSize;
 
-    /*if (llwrite(packet, index) < 0) {
+    if (llwrite(packet, index) < 0) {
         free(packet);
         return -1;
-    }*/
+    }
 
     printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
 
