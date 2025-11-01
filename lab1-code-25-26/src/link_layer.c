@@ -130,10 +130,6 @@ int llopen(LinkLayer connectionParameters)
                 }
             }
         }
-        // Confirmar que o frame foi corretamente recebido
-        if (state == STOP_R && byte == FLAG) {
-            printf("DEBUG (llopen): Frame recebido com sucesso\n");
-        }
 
         unsigned char frame[5];
         int frameIndex = 0;
@@ -149,6 +145,10 @@ int llopen(LinkLayer connectionParameters)
         }
 
         writeBytesSerialPort(frame, frameIndex);
+        if (state == STOP_R && byte == FLAG) {
+            printf("DEBUG (llopen): Frame recebido com sucesso\n");
+            return 1;
+        }
     }
 
     else if (connectionParameters.role == LlTx)
