@@ -62,19 +62,6 @@ void alarmHandler(int signal) {
     alarmCount++;
 }
 
-// STATE MACHINE
-typedef struct
-{
-    LinkLayerState state;
-    unsigned char address;
-    unsigned char control;
-    unsigned char bcc;
-} SM;
-
-void sm_process(SM *sm, unsigned char byte);
-void send_UA();
-void sm_init(SM *sm);
-
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -387,69 +374,3 @@ int byteDestuffing(const unsigned char *input, int length, unsigned char *output
     return destuffedIndex;
 }
 
-void sm_init(SM *sm)
-{
-    sm->state = START;
-    sm->address = 0;
-    sm->control = 0;
-    sm->bcc = 0;
-}
-
-void send_UA()
-{
-    unsigned char F = 0x7E;
-    unsigned char A = 0x03;
-    unsigned char C = 0x07;
-    unsigned char BCC1 = A ^ C;
-    unsigned char buf[256] = {F, A, C, BCC1, F};
-    writeBytesSerialPort(buf, 5);
-}
-
-void sm_process(SM *sm, unsigned char byte) {
-        switch (sm->state) {
-        case START:
-            if (byte == FLAG)
-                sm->state = FLAG_RCV;
-            break;
-
-        case FLAG_RCV:
-            if (byte == FLAG)
-                sm->state = FLAG_RCV;   // stay in FLAG_RCV
-            else if (byte == C_SET) {
-                sm->address = byte;
-                sm->state = A_RCV;
-            } else
-                sm->state = START;
-            break;
-
-        case A_RCV:
-            if (byte == FLAG)
-                sm->state = FLAG_RCV;
-            else if (byte == C_SET) {
-                sm->control = byte;
-                sm->state = C_RCV;
-            } else
-                sm->state = START;
-            break;
-
-        case C_RCV:
-            if (byte == FLAG)
-                sm->state = FLAG_RCV;
-            else if (byte == (sm->address ^ sm->control)) {
-                sm->bcc = byte;
-                sm->state = BCC1_OK;
-            } else
-                sm->state = START;
-            break;
-
-        case BCC1_OK:
-            if (byte == FLAG)
-                sm->state = STOP_R;
-            else
-                sm->state = START;
-            break;
-
-        case STOP_R:
-            break;
-    }
-}
