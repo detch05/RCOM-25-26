@@ -26,10 +26,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     };
     strcpy(config.serialPort, serialPort);
     
-    /*if (llopen(config) < 0) {
+    if (llopen(config) < 0) {
         perror("Erro ao abrir a conexão\n");
         exit(-1);
-    }*/
+    }
 
     printf("Choosing transmission mode...\n");
     if (config.role == LlTx) {
@@ -39,6 +39,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         //start reception
     }
 
+    //printf("Closing connection...\n");
     //llclose();
 }
 
@@ -117,7 +118,8 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
         return -1;
     }
 
-    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
+    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes) -> WAITING UA\n", controlType, index);
+
 
     free(packet);
     return 0;

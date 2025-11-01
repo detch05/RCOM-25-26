@@ -13,6 +13,7 @@
 
 #define MAX_FRAME_SIZE 2048 // Tamanho maximo de cada frame
 
+LinkLayerRole currentRole;
 
 // Endereços de controlo para UA
 #define C_RR0 0xAA  
@@ -47,13 +48,12 @@ typedef enum {
     A_RCV,
     C_RCV,
     BCC1_OK,
-    DATA,
+    //DATA,
     STOP_R
 } LinkLayerState;
 
 
-int timeout = 3;                
-int retransmissions = 5;         
+int timeout,retransmissions;         
 int alarmEnabled = 0;            
 int alarmCount = 0;
 
@@ -66,44 +66,96 @@ void alarmHandler(int signal) {
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
-int llopen(LinkLayer connectionParameters)
+int llopen(LinkLayer config)
 {
-    if (openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
-    {
-        perror("openSerialPort");
-        exit(-1);
-    }
+    LinkLayerState state = START;
+    if (openSerialPort(config.serialPort, config.baudRate) < 0) return -1;
 
-    printf("Serial port %s opened\n", connectionParameters.serialPort);
+    unsigned char byte;
+    timeout = config.timeout;
+    retransmissions = config.nRetransmissions;
+    
+    switch(config.role) {
+        case(LlTx): {
+            while (config.nRetransmissions != 0 && state != STOP_R) {
+                sendSupervisionFrame(A_TRANSMITTER, C_SET);
+                alarm(config.timeout);
+                alarmEnabled = 0;
 
-    // Read from serial port until the 'z' char is received.
+                while (alarmEnabled == 0 && state != STOP_R) {
+                    int res = readByteSerialPort(&byte);
+                    if (res > 0) {
+                        switch (state) {
+                            case START:
+                                if (byte == FLAG) {
+                                    state = FLAG_RCV;
+                                }
+                                break;
+                            case FLAG_RCV:
+                                if (byte == A_RECEIVER) {
+                                    state = A_RCV;
+                                }
+                                else if (byte != FLAG) state = START;
+                                break;
+                            case A_RCV:
+                                if (byte == C_UA) {
+                                    state = C_RCV;
+                                }
+                                else if (byte == FLAG) state = FLAG_RCV;
+                                else state = START;
+                                break;
+                            case C_RCV:
+                                if (byte == (A_RECEIVER ^ C_UA)) {
+                                    state = BCC1_OK;
+                                }
+                                else if (byte == FLAG) state = FLAG_RCV;
+                                else state = START;
+                                break;
+                            case BCC1_OK:
+                                if (byte == FLAG) {
+                                    state = STOP_R;
+                                }
+                                else state = START;
+                                break;
+                            default: 
+                                break;
+                        }
+                    }
+                } 
+                config.nRetransmissions--;
+            }
+            if (state != STOP_R) {
+                printf("DEBUG (llopen): Erro ao estabelecer ligação, número de tentativas esgotado\n");
+                return -1;
+            }
+            printf("DEBUG (llopen): Ligação estabelecida com sucesso\n");
+            currentRole = LlTx;
+            break;  
+        }
 
-    // NOTE: This while() cycle is a simple example showing how to read from the serial port.
-    // It must be changed in order to respect the specifications of the protocol indicated in the Lab guide.
-
-    // TODO: Save the received bytes in a buffer array and print it at the end of the program.
-    if(connectionParameters.role == LlRx)
-    {
-        unsigned char byte;
-        LinkLayerState state = START;
-        while (!alarmEnabled && state != STOP_R) {
-            if (readByteSerialPort(&byte) > 0) {
-                switch (state) {
+        case(LlRx): {
+            while (state != STOP_R)
+            {
+                int res = readByteSerialPort(&byte);
+                if (res <= 0) continue;
+                switch (state)
+                {
                     case START:
                         if (byte == FLAG) state = FLAG_RCV;
                         break;
                     case FLAG_RCV:
                         if (byte == A_TRANSMITTER) state = A_RCV;
-                        else if (byte == FLAG) state = FLAG_RCV;
-                        else state = START;
+                        else if (byte != FLAG) state = START;
                         break;
                     case A_RCV:
-                        if (byte == C_SET) state = C_RCV;  // Recepção correta
+                        if (byte == C_SET) state = C_RCV;
                         else if (byte == FLAG) state = FLAG_RCV;
                         else state = START;
                         break;
                     case C_RCV:
-                        if (byte == A_TRANSMITTER ^ C_SET) state = BCC1_OK;
+                        if (byte == (A_TRANSMITTER ^ C_SET)) {
+                            state = BCC1_OK;
+                        }
                         else if (byte == FLAG) state = FLAG_RCV;
                         else state = START;
                         break;
@@ -111,104 +163,19 @@ int llopen(LinkLayer connectionParameters)
                         if (byte == FLAG) state = STOP_R;
                         else state = START;
                         break;
-                    default:
-                        state = START;
+                    case STOP_R:
                         break;
                 }
             }
+            sendSupervisionFrame(A_RECEIVER, C_UA);
+            currentRole = LlRx;
+            break;
         }
-
-        unsigned char frame[5];
-        int frameIndex = 0;
-        
-        frame[frameIndex++] = FLAG;
-        frame[frameIndex++] = A_TRANSMITTER;
-        frame[frameIndex++] = C_UA;
-        frame[frameIndex++] = A_TRANSMITTER ^ C_UA;
-        frame[frameIndex++] = FLAG;
-
-        for (int i = 0; i < frameIndex; i++) {
-            printf("DEBUG (llopen): Frame[%d] = 0x%X\n", i, frame[i]);
-        }
-        writeBytesSerialPort(frame, frameIndex);
-
-        if (state == STOP_R && byte == FLAG) {
-            printf("DEBUG (llopen): Frame recebido com sucesso\n");
-            return 1;
-        }
+        default:
+            return -1;
+            break;
     }
-
-    else if (connectionParameters.role == LlTx)
-    {
-        unsigned char frame[5];
-        int frameIndex = 0;
-        
-        frame[frameIndex++] = FLAG;
-        frame[frameIndex++] = A_TRANSMITTER;
-        frame[frameIndex++] = C_SET;
-        frame[frameIndex++] = A_TRANSMITTER ^ C_SET;
-        frame[frameIndex++] = FLAG;
-
-        for (int i = 0; i < frameIndex; i++) {
-            printf("DEBUG (llopen): Frame[%d] = 0x%X\n", i, frame[i]);
-        }
-
-        int tentativas = retransmissions;
-        while (tentativas > 0) {
-            writeBytesSerialPort(frame, frameIndex);
-            alarmEnabled = 0;
-            alarm(timeout);
-
-            printf("DEBUG (llopen): Frame enviado, aguardando confirmação...\n");
-
-            unsigned char byte;
-            LinkLayerState state = START;
-            while (!alarmEnabled && state != STOP_R) {
-                if (readByteSerialPort(&byte) > 0) {
-                    switch (state) {
-                        case START:
-                            if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case FLAG_RCV:
-                            if (byte == A_TRANSMITTER) state = A_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case A_RCV:
-                            if (byte == C_UA) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case C_RCV:
-                            if (byte == A_TRANSMITTER ^ C_UA) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
-                            else state = START;
-                            break;
-                        default:
-                            state = START;
-                            break;
-                    }
-                }
-            }
-
-            // Confirmar que o frame foi corretamente recebido e avançar
-            if (state == STOP_R && byte == FLAG) {
-                printf("DEBUG (llopen): Frame recebido com sucesso\n");
-                return frameIndex;
-            }
-
-            printf("DEBUG (llopen): Timeout ou erro, reenviando frame...\n");
-            tentativas--;
-        }
-    }
-
-    printf("DEBUG (llopen): Erro ao enviar frame/n");
-    return -1;
+    return 0;
 }
 
 ////////////////////////////////////////////////
@@ -233,8 +200,11 @@ int llwrite(const unsigned char *buf, int bufSize) {
         printf("DEBUG (llwrite): Frame[%d] = 0x%X\n", i, frame[i]);
     }
 
-    int tentativas = retransmissions;
-    while (tentativas > 0) {
+    return 0;
+
+    
+    int tentativas = 0;
+    while (tentativas < retransmissions) {
         writeBytesSerialPort(frame, frameIndex);
         alarmEnabled = 0;
         alarm(timeout);
@@ -276,7 +246,8 @@ int llwrite(const unsigned char *buf, int bufSize) {
         }
 
         printf("DEBUG (llwrite): Timeout ou erro, reenviando frame...\n");
-        tentativas--;
+        tentativas++;
+        
     }
 
     
@@ -296,25 +267,25 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(LinkLayerRole role)
-{   
-    printf("DEBUG (llclose): Iniciando processo de terminação/n");
+int llclose() {
     LinkLayerState state = START;
-    if(role == LlRx)
-    {
-        unsigned char byte;
-        LinkLayerState state = START;
-        while (!alarmEnabled && state != STOP_R) {
-            if (readByteSerialPort(&byte) > 0) {
+    unsigned char byte;
+
+    while (retransmissions != 0 && state != STOP_R) {
+        sendSupervisionFrame(A_TRANSMITTER, C_DISC);
+        alarm(timeout);
+        alarmEnabled = 0;
+
+        while (alarmEnabled == 0 && state != STOP_R) {
+            int res = readByteSerialPort(&byte);
+            if (res > 0) {
                 switch (state) {
                     case START:
                         if (byte == FLAG) state = FLAG_RCV;
-                        else state = START;
                         break;
                     case FLAG_RCV:
-                        if (byte == A_TRANSMITTER) state = A_RCV;
-                        else if (byte == FLAG) state = FLAG_RCV;
-                        else state = START;
+                        if (byte == A_RECEIVER) state = A_RCV;
+                        else if (byte != FLAG) state = START;
                         break;
                     case A_RCV:
                         if (byte == C_DISC) state = C_RCV;
@@ -322,7 +293,7 @@ int llclose(LinkLayerRole role)
                         else state = START;
                         break;
                     case C_RCV:
-                        if (byte == A_TRANSMITTER ^ C_DISC) state = BCC1_OK;
+                        if (byte == (A_RECEIVER ^ C_DISC)) state = BCC1_OK;
                         else if (byte == FLAG) state = FLAG_RCV;
                         else state = START;
                         break;
@@ -330,111 +301,23 @@ int llclose(LinkLayerRole role)
                         if (byte == FLAG) state = STOP_R;
                         else state = START;
                         break;
-                    default:
-                        state = START;
+                    default: 
                         break;
                 }
             }
-        }
-        unsigned char frame[5];
-        int frameIndex = 0;
-        
-        frame[frameIndex++] = FLAG;
-        frame[frameIndex++] = A_RECEIVER;
-        frame[frameIndex++] = C_DISC;
-        frame[frameIndex++] = A_TRANSMITTER ^ C_DISC;
-        frame[frameIndex++] = FLAG;
-
-        for (int i = 0; i < frameIndex; i++) {
-            printf("DEBUG (llclose): Frame[%d] = 0x%X\n", i, frame[i]);
-        }
-
-        writeBytesSerialPort(frame, frameIndex);
+        } 
+        retransmissions--;
     }
-    else if (role == LlTx)
-    {
-        unsigned char frame[5];
-        int frameIndex = 0;
-        
-        frame[frameIndex++] = FLAG;
-        frame[frameIndex++] = A_TRANSMITTER;
-        frame[frameIndex++] = C_DISC;
-        frame[frameIndex++] = A_TRANSMITTER ^ C_DISC;
-        frame[frameIndex++] = FLAG;
-
-        for (int i = 0; i < frameIndex; i++) {
-            printf("DEBUG (llclose): Frame[%d] = 0x%X\n", i, frame[i]);
-        }
-
-        int tentativas = retransmissions;
-        while (tentativas > 0) {
-            writeBytesSerialPort(frame, frameIndex);
-            alarmEnabled = 0;
-            alarm(timeout);
-
-            printf("DEBUG (llclose): Frame enviado, aguardando confirmação...\n");
-
-            unsigned char byte;
-            LinkLayerState state = START;
-            while (!alarmEnabled && state != STOP_R) {
-                if (readByteSerialPort(&byte) > 0) {
-                    switch (state) {
-                        case START:
-                            if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case FLAG_RCV:
-                            if (byte == A_RECEIVER) state = A_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case A_RCV:
-                            if (byte == C_DISC) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case C_RCV:
-                            if (byte == A_TRANSMITTER ^ C_DISC) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
-                            else state = START;
-                            break;
-                        default:
-                            state = START;
-                            break;
-                    }
-                }
-            }
-
-            // Confirmar que o frame foi corretamente recebido e avançar
-            if (state == STOP_R && byte == FLAG) {
-                printf("DEBUG (llclose): Frame recebido com sucesso\n");
-                unsigned char frame[5];
-                int frameIndex = 0;
-                
-                frame[frameIndex++] = FLAG;
-                frame[frameIndex++] = A_TRANSMITTER;
-                frame[frameIndex++] = C_UA;
-                frame[frameIndex++] = A_TRANSMITTER ^ C_UA;
-                frame[frameIndex++] = FLAG;
-
-                for (int i = 0; i < frameIndex; i++) {
-                    printf("DEBUG (llopen): Frame[%d] = 0x%X\n", i, frame[i]);
-                }
-                writeBytesSerialPort(frame, frameIndex);
-            }
-
-            printf("DEBUG (llclose): Timeout ou erro, reenviando frame...\n");
-            tentativas--;
-        }
-    }
-    closeSerialPort();
-    return 0;
+    if (state != STOP_R) return -1;
+    sendSupervisionFrame(A_TRANSMITTER, C_UA);
+    return closeSerialPort();
 }
 
+void sendSupervisionFrame(unsigned char address, unsigned char control) {
+    unsigned char frame[5] = {FLAG, address, control, address ^ control, FLAG};
+    writeBytesSerialPort(frame, 5);
+    printf("DEBUG (sendSupervisionFrame): A enviar frame de controlo: 0x%X\n", control);
+}
 
 unsigned char getBCC2(const unsigned char *buf, int bufSize) {
     unsigned char bcc2 = 0;
@@ -465,7 +348,7 @@ int byteStuffing(const unsigned char *input, int length, unsigned char *output) 
             //printf("DEBUG (byteStuffing): Byte sem alteração = 0x%X\n", input[i]);
         }
     }
-    printf("DEBUG (byteStuffing): Tamanho final após stuffing = %d\n", stuffedIndex);
+    printf("DEBUG (byteStuffing): Total de bytes adicionados no out buffer depois do stuffing = %d\n", stuffedIndex);
     return stuffedIndex;
 }
 

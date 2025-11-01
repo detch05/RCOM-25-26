@@ -49,4 +49,6 @@ int byteStuffing(const unsigned char *input, int length, unsigned char *output);
 
 int byteDeStuffing(const unsigned char *input, int length, unsigned char *output);
 
+void sendSupervisionFrame(unsigned char address, unsigned char control);
+
 #endif // _LINK_LAYER_H_
