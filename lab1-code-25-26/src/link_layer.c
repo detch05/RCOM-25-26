@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <signal.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -48,7 +48,7 @@ typedef enum {
     A_RCV,
     C_RCV,
     BCC1_OK,
-    //DATA,
+    DATA,
     STOP_R
 } LinkLayerState;
 
@@ -62,6 +62,8 @@ void alarmHandler(int signal) {
     alarmCount++;
 }
 
+// Variavel utilizado para controlar erros durante a transferencia de DATA
+int errorControl = 0;
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -74,6 +76,8 @@ int llopen(LinkLayer config)
     unsigned char byte;
     timeout = config.timeout;
     retransmissions = config.nRetransmissions;
+    /* install SIGALRM handler so alarmEnabled is set when timeout expires */
+    signal(SIGALRM, alarmHandler);
     
     switch(config.role) {
         case(LlTx): {
@@ -116,6 +120,8 @@ int llopen(LinkLayer config)
                                     state = STOP_R;
                                 }
                                 else state = START;
+                                break;
+                            case DATA:
                                 break;
                             default: 
                                 break;
@@ -163,6 +169,8 @@ int llopen(LinkLayer config)
                         if (byte == FLAG) state = STOP_R;
                         else state = START;
                         break;
+                    case DATA:
+                        break;
                     case STOP_R:
                         break;
                 }
@@ -185,6 +193,8 @@ int llwrite(const unsigned char *buf, int bufSize) {
 
     unsigned char frame[MAX_FRAME_SIZE];
     int frameIndex = 0;
+    /* ensure SIGALRM handler is installed for retransmission timeouts */
+    signal(SIGALRM, alarmHandler);
     
     frame[frameIndex++] = FLAG;
     frame[frameIndex++] = A_TRANSMITTER;
@@ -196,12 +206,9 @@ int llwrite(const unsigned char *buf, int bufSize) {
     frameIndex += byteStuffing(&BCC2, 1, &frame[frameIndex]);
     frame[frameIndex++] = FLAG;
 
-    for (int i = 0; i < frameIndex; i++) {
+    /*for (int i = 0; i < frameIndex; i++) {
         printf("DEBUG (llwrite): Frame[%d] = 0x%X\n", i, frame[i]);
-    }
-
-    return 0;
-
+    }*/
     
     int tentativas = 0;
     while (tentativas < retransmissions) {
@@ -260,8 +267,116 @@ int llwrite(const unsigned char *buf, int bufSize) {
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    readByteSerialPort(packet);
-    return 0;
+    LinkLayerState state = START;
+    unsigned char frame[MAX_FRAME_SIZE];
+    int frameIndex = 0;
+    unsigned char byte;
+    int tentativas = 0;
+
+    /* ensure SIGALRM handler is installed for read timeouts */
+    signal(SIGALRM, alarmHandler);
+
+    //Loop que tenta receber o frame n vezes
+
+    while(tentativas  < retransmissions)
+    {
+        alarmEnabled = 0;
+        alarm(timeout);
+
+        // Loop para ler bytes até receber um frame completo
+        while (!alarmEnabled && state != STOP_R) {
+        if (readByteSerialPort(&byte) > 0) {
+            switch (state)
+            {
+                case START:
+                    if (byte == FLAG) {
+                        state = FLAG_RCV;
+                        printf("DEBUG (llread): Transição para FLAG_RCV\n");
+                    }
+                    break;
+                case FLAG_RCV:
+                    if (byte == A_TRANSMITTER) {
+                        state = A_RCV;
+                        printf("DEBUG (llread): Transição para A_RCV\n");
+                    }
+                    break;
+                case A_RCV:
+                    if (byte == C_DATA) {
+                        state = C_RCV;
+                        printf("DEBUG (llread): Transição para C_RCV (Command_DATA)\n");
+                    } else if (byte == C_DISC) {
+                        printf("DEBUG (llread): Command_DISC recebido, desconectando...\n");
+                        return -2;
+                    }
+                    break;
+                case C_RCV:
+                    if (byte == (A_TRANSMITTER ^ C_DATA)) {
+                        state = BCC1_OK;
+                        printf("DEBUG (llread): BCC1 OK, transição para DATA\n");
+                    }
+                    break;
+                case BCC1_OK:
+                    if (byte != FLAG) {
+                        frame[frameIndex++] = byte;
+                        state = DATA;
+                        printf("DEBUG (llread): Transição para DATA, dado recebido = 0x%X\n", byte);
+                    }
+                    break;
+                case DATA:
+                    if (byte == FLAG) {
+                        state = STOP_R;
+                        printf("DEBUG (llread): FLAG de fim recebido, transição para STOP_R\n");
+                    } else {
+                        frame[frameIndex++] = byte;
+                        printf("DEBUG (llread): Dado adicionado ao frame = 0x%X\n", byte);
+                    }
+                    break;
+                default:
+                    state = START;
+                    printf("DEBUG (llread): Estado desconhecido, reiniciando para START\n");
+                    break;
+            }
+        }
+    }
+
+    // Processa o frame se ele for corretamente recebido
+    if(state == STOP_R) {
+        int destuffedSize = byteDestuffing(frame, frameIndex, packet);
+        unsigned char BCC2 = getBCC2(packet, destuffedSize - 1);
+
+        //Verifica o BCC2 para garantir integridade dos dados
+        if (BCC2 == packet[destuffedSize - 1]) {
+            printf("DEBUG (llread): Frame recebido corretamente. Envianda RR...\n");
+            if (errorControl == 0) {
+                sendSupervisionFrame(A_RECEIVER, C_RR0);
+            } else {
+                sendSupervisionFrame(A_RECEIVER, C_RR1);
+            }
+            errorControl = (errorControl + 1) % 2;
+            return destuffedSize - 1;
+            } else {
+                printf("DEBUG (llread): Erro: BCC2 incorreto. A enviar REJ...\n");
+                if (errorControl == 0) {
+                    sendSupervisionFrame(A_RECEIVER, C_REJ0);
+                } else {
+                    sendSupervisionFrame(A_RECEIVER, C_REJ1);
+                }
+                tentativas++;
+                state = START;
+                frameIndex = 0;
+            }
+        } else if (alarmEnabled) {
+            tentativas++;
+            tentativas < retransmissions ? printf("DEBUG (llread): Tempo de espera esgotado, tentando outra vez...\n") :
+                printf("DEBUG (llread): Tentativas esgotadas\n");
+            
+            state = START;  
+            frameIndex = 0;
+        }
+    }
+
+    printf("DEBUG (llread): Não foi possivel receber o frame corretamente\n");
+    return -1;
 }
 
 ////////////////////////////////////////////////
@@ -269,48 +384,90 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose() {
     LinkLayerState state = START;
-    unsigned char byte;
+    
+    if (currentRole == LlTx) {
+        signal(SIGALRM, alarmHandler);
+        int tentativas = 0;
 
-    while (retransmissions != 0 && state != STOP_R) {
-        sendSupervisionFrame(A_TRANSMITTER, C_DISC);
-        alarm(timeout);
-        alarmEnabled = 0;
+        while (tentativas < retransmissions && state != STOP_R) {
+            printf("DEBUG (llclose): Enviando DISC...\n");
+            sendSupervisionFrame(A_TRANSMITTER, C_DISC);
+            alarm(timeout);
+            alarmEnabled = 0;
 
-        while (alarmEnabled == 0 && state != STOP_R) {
-            int res = readByteSerialPort(&byte);
-            if (res > 0) {
+            unsigned char byte;
+
+            while (!alarmEnabled && state != STOP_R) {
+                int res = readByteSerialPort(&byte);
+                if (res > 0) {
+                    switch (state) {
+                        case START:
+                            if (byte == FLAG) state = FLAG_RCV;
+                            break;
+                        case FLAG_RCV:
+                            if (byte == A_RECEIVER) state = A_RCV;
+                            else if (byte != FLAG) state = START;
+                            break;
+                        case A_RCV:
+                            if (byte == C_DISC) state = C_RCV;
+                            else if (byte == FLAG) state = FLAG_RCV;
+                            else state = START;
+                            break;
+                        case C_RCV:
+                            if (byte == (A_RECEIVER ^ C_DISC)) state = BCC1_OK;
+                            else if (byte == FLAG) state = FLAG_RCV;
+                            else state = START;
+                            break;
+                        case BCC1_OK:
+                            if (byte == FLAG) state = STOP_R;
+                            else state = START;
+                            break;
+                        default: 
+                            break;
+                    }
+                }
+            }
+            if (state == STOP_R) {
+                printf("DEBUG (llclose): DISC de confirmação recebido, enviando UA...\n");
+                sendSupervisionFrame(A_TRANSMITTER, C_UA);
+            } else {
+                tentativas++;
+                if (!(tentativas < retransmissions)) return -1;
+            }
+        }
+    }
+    else if (currentRole == LlRx) {
+        while (state != STOP_R) {
+            // Loop para tentar receber o DISC do transmissor
+            unsigned char byte;
+            if (readByteSerialPort(&byte) > 0) {
+                // Máquina de estados para processar o DISC do transmissor
                 switch (state) {
                     case START:
                         if (byte == FLAG) state = FLAG_RCV;
                         break;
                     case FLAG_RCV:
-                        if (byte == A_RECEIVER) state = A_RCV;
-                        else if (byte != FLAG) state = START;
+                        if (byte == A_TRANSMITTER) state = A_RCV;
                         break;
                     case A_RCV:
                         if (byte == C_DISC) state = C_RCV;
-                        else if (byte == FLAG) state = FLAG_RCV;
-                        else state = START;
                         break;
                     case C_RCV:
-                        if (byte == (A_RECEIVER ^ C_DISC)) state = BCC1_OK;
-                        else if (byte == FLAG) state = FLAG_RCV;
-                        else state = START;
+                        if (byte == (A_TRANSMITTER ^ C_DISC)) state = BCC1_OK;
                         break;
                     case BCC1_OK:
                         if (byte == FLAG) state = STOP_R;
-                        else state = START;
                         break;
-                    default: 
+                    default:
                         break;
                 }
             }
-        } 
-        retransmissions--;
+        }
+        printf("DEBUG (llclose): DISC recebido, enviando DISC de confirmação...\n");
+        sendSupervisionFrame(A_RECEIVER, C_DISC);
     }
-    if (state != STOP_R) return -1;
-    sendSupervisionFrame(A_TRANSMITTER, C_UA);
-    return closeSerialPort();
+    closeSerialPort();
+    return 0;
 }
 
 void sendSupervisionFrame(unsigned char address, unsigned char control) {

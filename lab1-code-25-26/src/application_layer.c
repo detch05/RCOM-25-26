@@ -9,7 +9,7 @@
 
 
 static int startTransmission(const char *filename);
-//static int startReception(const char *filename);
+static int startReception(const char *filename);
 static FILE* openFile(const char *filename, const char *mode);
 static long getFileSize(FILE *file);
 static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize);
@@ -36,11 +36,11 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         startTransmission(filename);
     }
     else if (config.role == LlRx) {
-        //start reception
+        startReception(filename);
     }
 
-    //printf("Closing connection...\n");
-    //llclose();
+    printf("Closing connection...\n");
+    llclose();
 }
 
 
@@ -85,10 +85,27 @@ static int startTransmission(const char *filename) {
 }
 
 
-/*static int startReception(const char *filename) {
-    // Implementar a recepção
-    return 0;
-}*/
+static int startReception(const char *filename) {
+    
+    FILE *file = openFile(filename, "wb");
+    if (!file) return -1;
+
+    unsigned char buffer[512];
+    int packetSize;
+
+    // Recebe pacotes até o final do arquivo
+    while ((packetSize = llread(buffer)) > 0) {
+        if (buffer[0] == 0x01) {  // Verifica se é um pacote de dados
+            fwrite(buffer + 4, sizeof(unsigned char), packetSize - 4, file);
+        } else if (buffer[0] == 0x03) {  // Pacote de controle final
+            break;
+        }
+    }
+
+    fclose(file);  // Fecha o arquivo após a recepção completa
+    return packetSize < 0 ? -1 : 0;
+}
+
 
 static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize) {
     int filenameSize = strlen(filename);
@@ -118,7 +135,7 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
         return -1;
     }
 
-    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes) -> WAITING UA\n", controlType, index);
+    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
 
 
     free(packet);

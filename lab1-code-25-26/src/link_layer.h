@@ -47,7 +47,7 @@ unsigned char getBCC2(const unsigned char *buf, int bufSize);
 
 int byteStuffing(const unsigned char *input, int length, unsigned char *output);
 
-int byteDeStuffing(const unsigned char *input, int length, unsigned char *output);
+int byteDestuffing(const unsigned char *input, int length, unsigned char *output);
 
 void sendSupervisionFrame(unsigned char address, unsigned char control);
 
