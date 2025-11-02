@@ -284,6 +284,7 @@ int llread(unsigned char *packet)
         alarm(timeout);
 
         // Loop para ler bytes até receber um frame completo
+        printf("DEBUG (llread): A aguardar frame...\n");
         while (!alarmEnabled && state != STOP_R) {
         if (readByteSerialPort(&byte) > 0) {
             switch (state)
@@ -291,49 +292,49 @@ int llread(unsigned char *packet)
                 case START:
                     if (byte == FLAG) {
                         state = FLAG_RCV;
-                        printf("DEBUG (llread): Transição para FLAG_RCV\n");
+                        //printf("DEBUG (llread): Transição para FLAG_RCV\n");
                     }
                     break;
                 case FLAG_RCV:
                     if (byte == A_TRANSMITTER) {
                         state = A_RCV;
-                        printf("DEBUG (llread): Transição para A_RCV\n");
+                        //printf("DEBUG (llread): Transição para A_RCV\n");
                     }
                     break;
                 case A_RCV:
                     if (byte == C_DATA) {
                         state = C_RCV;
-                        printf("DEBUG (llread): Transição para C_RCV (Command_DATA)\n");
+                        //printf("DEBUG (llread): Transição para C_RCV (Command_DATA)\n");
                     } else if (byte == C_DISC) {
-                        printf("DEBUG (llread): Command_DISC recebido, desconectando...\n");
+                        //printf("DEBUG (llread): Command_DISC recebido, desconectando...\n");
                         return -2;
                     }
                     break;
                 case C_RCV:
                     if (byte == (A_TRANSMITTER ^ C_DATA)) {
                         state = BCC1_OK;
-                        printf("DEBUG (llread): BCC1 OK, transição para DATA\n");
+                        //printf("DEBUG (llread): BCC1 OK, transição para DATA\n");
                     }
                     break;
                 case BCC1_OK:
                     if (byte != FLAG) {
                         frame[frameIndex++] = byte;
                         state = DATA;
-                        printf("DEBUG (llread): Transição para DATA, dado recebido = 0x%X\n", byte);
+                        //printf("DEBUG (llread): Transição para DATA, dado recebido = 0x%X\n", byte);
                     }
                     break;
                 case DATA:
                     if (byte == FLAG) {
                         state = STOP_R;
-                        printf("DEBUG (llread): FLAG de fim recebido, transição para STOP_R\n");
+                        //printf("DEBUG (llread): FLAG de fim recebido, transição para STOP_R\n");
                     } else {
                         frame[frameIndex++] = byte;
-                        printf("DEBUG (llread): Dado adicionado ao frame = 0x%X\n", byte);
+                        //printf("DEBUG (llread): Dado adicionado ao frame = 0x%X\n", byte);
                     }
                     break;
                 default:
                     state = START;
-                    printf("DEBUG (llread): Estado desconhecido, reiniciando para START\n");
+                    //printf("DEBUG (llread): Estado desconhecido, reiniciando para START\n");
                     break;
             }
         }
@@ -376,7 +377,7 @@ int llread(unsigned char *packet)
     }
 
     printf("DEBUG (llread): Não foi possivel receber o frame corretamente\n");
-    return -1;
+    exit(-1);
 }
 
 ////////////////////////////////////////////////
@@ -437,7 +438,13 @@ int llclose() {
         }
     }
     else if (currentRole == LlRx) {
-        while (state != STOP_R) {
+        signal(SIGALRM, alarmHandler);
+        int tentativas = 0;
+
+        while (tentativas < retransmissions && state != STOP_R) {
+            alarm(timeout);
+            alarmEnabled = 0;
+
             // Loop para tentar receber o DISC do transmissor
             unsigned char byte;
             if (readByteSerialPort(&byte) > 0) {
@@ -462,6 +469,11 @@ int llclose() {
                         break;
                 }
             }
+            tentativas++;
+        }
+        if (state != STOP_R) {
+            printf("DEBUG (llclose): Erro ao receber DISC, número de tentativas esgotado\n");
+            return -1;
         }
         printf("DEBUG (llclose): DISC recebido, enviando DISC de confirmação...\n");
         sendSupervisionFrame(A_RECEIVER, C_DISC);

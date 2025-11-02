@@ -10,9 +10,12 @@
 
 static int startTransmission(const char *filename);
 static int startReception(const char *filename);
+static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize);
+static unsigned char* createDataPacket(unsigned char *buffer, int bufferSize);
 static FILE* openFile(const char *filename, const char *mode);
 static long getFileSize(FILE *file);
-static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize);
+//static unsigned char nextSequence(unsigned char seq);
+
 
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
@@ -41,6 +44,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
     printf("Closing connection...\n");
     llclose();
+    printf("CONNECTION CLOSED\n");
 }
 
 
@@ -64,12 +68,25 @@ static int startTransmission(const char *filename) {
         return 1;
     }
 
-   
+    //  Cria e envia pacotes
+    //unsigned char seq = 0;
+    unsigned char buffer[256];
+    int countBytesReaded = 0;
 
-    ///////////////////////////////////
-    // Implementar ciclo while que cria e envia pacotes
-    ///////////////////////////////////
-
+    while ((countBytesReaded = fread(buffer, sizeof(unsigned char), sizeof(buffer), file)) > 0) {
+        // Cria o pacote de dados com os bytes lidos
+        printf("Criando data packet com %d bytes...\n", countBytesReaded);
+        unsigned char *dataPacket = createDataPacket(buffer, countBytesReaded);
+        
+        
+        printf("Enviando data packet...\n");
+        if (llwrite(dataPacket, countBytesReaded + 3) < 0) {
+            free(dataPacket);
+            return -1;
+        }
+        //seq = nextSequence(seq);  // Atualiza a sequência
+        free(dataPacket);
+    }
 
     // Envia o end packet
 
@@ -90,7 +107,7 @@ static int startReception(const char *filename) {
     FILE *file = openFile(filename, "wb");
     if (!file) return -1;
 
-    unsigned char buffer[512];
+    unsigned char buffer[518];
     int packetSize;
 
     // Recebe pacotes até o final do arquivo
@@ -135,12 +152,29 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
         return -1;
     }
 
-    printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
-
+    //printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
 
     free(packet);
     return 0;
+}
 
+// Cria um pacote de dados
+static unsigned char* createDataPacket(unsigned char *buffer, int bufferSize) {
+    printf("DEBUG (createDataPacket): malloc de %d bytes para o data packet\n", bufferSize + 3);
+    unsigned char* dataPacket = malloc(bufferSize + 3);
+    if (!dataPacket) {
+        perror("malloc failed in createDataPacket");
+        return NULL;
+    }
+    printf("DEBUG (createDataPacket): malloc success\n");
+
+    int index = 0;
+    dataPacket[index++] = 0x01;                      //C
+    dataPacket[index++] = (bufferSize >> 8) & 0xFF;  //L2
+    dataPacket[index++] = bufferSize & 0xFF;         //L1
+    memcpy(dataPacket+3, buffer, bufferSize);  // Adiciona os dados ao pacote
+
+    return dataPacket;
 }
 
 // Abre um arquivo no modo indicado
@@ -165,3 +199,6 @@ static long getFileSize(FILE *file) {
 
 
 
+/*static unsigned char nextSequence(unsigned char seq) {
+    return (seq + 1) % 256; //Numero de sequencia entre 0 e 255
+}*/
