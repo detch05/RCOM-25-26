@@ -75,10 +75,13 @@ static int startTransmission(const char *filename) {
 
     while ((countBytesReaded = fread(buffer, sizeof(unsigned char), sizeof(buffer), file)) > 0) {
         // Cria o pacote de dados com os bytes lidos
-        printf("Criando data packet com %d bytes...\n", countBytesReaded);
+        //printf("Criando data packet com %d bytes...\n", countBytesReaded);
         unsigned char *dataPacket = createDataPacket(buffer, countBytesReaded);
-        
-        
+        if (!dataPacket) {
+            perror("createDataPacket failed");
+            return -1;
+        }
+
         printf("Enviando data packet...\n");
         if (llwrite(dataPacket, countBytesReaded + 3) < 0) {
             free(dataPacket);
@@ -89,7 +92,6 @@ static int startTransmission(const char *filename) {
     }
 
     // Envia o end packet
-
     printf("Enviando end packet...\n");
     if(sendControlPacket(0x03, filename, fileSize) < 0) {
         perror("Erro ao enviar o end packet");
@@ -113,7 +115,7 @@ static int startReception(const char *filename) {
     // Recebe pacotes até o final do arquivo
     while ((packetSize = llread(buffer)) > 0) {
         if (buffer[0] == 0x01) {  // Verifica se é um pacote de dados
-            fwrite(buffer + 4, sizeof(unsigned char), packetSize - 4, file);
+            fwrite(buffer + 3, sizeof(unsigned char), packetSize - 3, file);
         } else if (buffer[0] == 0x03) {  // Pacote de controle final
             break;
         }
@@ -126,25 +128,27 @@ static int startReception(const char *filename) {
 
 static int sendControlPacket(unsigned char controlType, const char *filename, long fileSize) {
     int filenameSize = strlen(filename);
-    unsigned char *packet = malloc(7 + filenameSize); // Aloca memória para o pacote de controle
+    /* Allocate exact TLV size:
+       1 byte C + [1 type + 1 length + sizeof(long) value] + [1 type + 1 length + filenameSize value]
+    */
+    int totalSize = 1 + (1 + 1 + sizeof(long)) + (1 + 1 + filenameSize);
+    unsigned char *packet = malloc(totalSize);
+    if (!packet) return -1;
     int index = 0;
 
     packet[index++] = controlType;
 
-    // File Size Type- Length- Value (TLV) structure
-    packet[index++] = 0;
-    packet[index++] = sizeof(long);
-
+    // File Size TLV: Type, Length, Value
+    packet[index++] = 0;                     // type = 0 (file size)
+    packet[index++] = sizeof(long);          // length
     for (int i = sizeof(long) - 1; i >= 0; i--) {
         packet[index++] = (fileSize >> (8 * i)) & 0xFF;
-        index++;
     }
 
-    // File name TLV structure
-    packet[index++] = 1;              
+    // File name TLV structure: Type, Length, Value
+    packet[index++] = 1;
     packet[index++] = filenameSize;
     memcpy(packet + index, filename, filenameSize);
-
     index += filenameSize;
 
     if (llwrite(packet, index) < 0) {
@@ -152,27 +156,20 @@ static int sendControlPacket(unsigned char controlType, const char *filename, lo
         return -1;
     }
 
-    //printf("Pacote de controle enviado com sucesso (tipo: %02X, tamanho: %d bytes)\n", controlType, index);
-
     free(packet);
     return 0;
 }
 
 // Cria um pacote de dados
 static unsigned char* createDataPacket(unsigned char *buffer, int bufferSize) {
-    printf("DEBUG (createDataPacket): malloc de %d bytes para o data packet\n", bufferSize + 3);
-    unsigned char* dataPacket = malloc(bufferSize + 3);
-    if (!dataPacket) {
-        perror("malloc failed in createDataPacket");
-        return NULL;
-    }
-    printf("DEBUG (createDataPacket): malloc success\n");
+    //printf("DEBUG (createDataPacket): malloc de %d bytes para o data packet\n", bufferSize + 3);
+    unsigned char* dataPacket = (unsigned char*)malloc(bufferSize + 1000);
 
     int index = 0;
     dataPacket[index++] = 0x01;                      //C
     dataPacket[index++] = (bufferSize >> 8) & 0xFF;  //L2
     dataPacket[index++] = bufferSize & 0xFF;         //L1
-    memcpy(dataPacket+3, buffer, bufferSize);  // Adiciona os dados ao pacote
+    memcpy(&dataPacket[index], buffer, bufferSize);  // Adiciona os dados ao pacote
 
     return dataPacket;
 }

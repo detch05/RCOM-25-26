@@ -347,7 +347,7 @@ int llread(unsigned char *packet)
 
         //Verifica o BCC2 para garantir integridade dos dados
         if (BCC2 == packet[destuffedSize - 1]) {
-            printf("DEBUG (llread): Frame recebido corretamente. Envianda RR...\n");
+            printf("DEBUG (llread): Frame recebido corretamente. Enviando RR...\n");
             if (errorControl == 0) {
                 sendSupervisionFrame(A_RECEIVER, C_RR0);
             } else {
@@ -356,7 +356,7 @@ int llread(unsigned char *packet)
             errorControl = (errorControl + 1) % 2;
             return destuffedSize - 1;
             } else {
-                printf("DEBUG (llread): Erro: BCC2 incorreto. A enviar REJ...\n");
+                printf("DEBUG (llread): Erro: BCC2 incorreto. Enviando REJ...\n");
                 if (errorControl == 0) {
                     sendSupervisionFrame(A_RECEIVER, C_REJ0);
                 } else {
@@ -444,38 +444,50 @@ int llclose() {
         while (tentativas < retransmissions && state != STOP_R) {
             alarm(timeout);
             alarmEnabled = 0;
+            //printf("DEBUG (llclose): Aguardando DISC do transmissor (tentativa %d)...\n", tentativas + 1);
 
-            // Loop para tentar receber o DISC do transmissor
-            unsigned char byte;
-            if (readByteSerialPort(&byte) > 0) {
-                // Máquina de estados para processar o DISC do transmissor
-                switch (state) {
-                    case START:
-                        if (byte == FLAG) state = FLAG_RCV;
-                        break;
-                    case FLAG_RCV:
-                        if (byte == A_TRANSMITTER) state = A_RCV;
-                        break;
-                    case A_RCV:
-                        if (byte == C_DISC) state = C_RCV;
-                        break;
-                    case C_RCV:
-                        if (byte == (A_TRANSMITTER ^ C_DISC)) state = BCC1_OK;
-                        break;
-                    case BCC1_OK:
-                        if (byte == FLAG) state = STOP_R;
-                        break;
-                    default:
-                        break;
+            // Loop interno para tentar ler bytes até timeout ou STOP_R
+            while (!alarmEnabled && state != STOP_R) {
+                unsigned char byte;
+                if (readByteSerialPort(&byte) > 0) {
+                    //printf("DEBUG (llclose): Byte recebido: 0x%02X\n", byte);
+                    switch (state) {
+                        case START:
+                            if (byte == FLAG) state = FLAG_RCV;
+                            //printf("DEBUG (llclose): Flag recebido, aguardando A...\n");
+                            break;
+                        case FLAG_RCV:
+                            if (byte == A_TRANSMITTER) state = A_RCV;
+                            //printf("DEBUG (llclose): A recebido, aguardando C...\n");
+                            break;
+                        case A_RCV:
+                            if (byte == C_DISC) state = C_RCV;
+                            //printf("DEBUG (llclose): C_DISC recebido, aguardando BCC1...\n");
+                            break;
+                        case C_RCV:
+                            if (byte == (A_TRANSMITTER ^ C_DISC)) state = BCC1_OK;
+                            //printf("DEBUG (llclose): BCC1 OK, aguardando FLAG...\n");
+                            break;
+                        case BCC1_OK:
+                            if (byte == FLAG) state = STOP_R;
+                            //printf("DEBUG (llclose): FLAG recebido, encerrando recepção\n");
+                            break;
+                        default:
+                            break;
+                    }
                 }
             }
-            tentativas++;
+            if (alarmEnabled) {
+                printf("DEBUG (llclose): Timeout na tentativa %d\n", tentativas + 1);
+                tentativas++;
+            }
         }
+        
         if (state != STOP_R) {
             printf("DEBUG (llclose): Erro ao receber DISC, número de tentativas esgotado\n");
             return -1;
         }
-        printf("DEBUG (llclose): DISC recebido, enviando DISC de confirmação...\n");
+        printf("DEBUG (llclose): DISC detectado, enviando DISC de confirmação...\n");
         sendSupervisionFrame(A_RECEIVER, C_DISC);
     }
     closeSerialPort();
@@ -485,7 +497,7 @@ int llclose() {
 void sendSupervisionFrame(unsigned char address, unsigned char control) {
     unsigned char frame[5] = {FLAG, address, control, address ^ control, FLAG};
     writeBytesSerialPort(frame, 5);
-    printf("DEBUG (sendSupervisionFrame): A enviar frame de controlo: 0x%X\n", control);
+    //printf("DEBUG (sendSupervisionFrame): A enviar frame de controlo: 0x%X\n", control);
 }
 
 unsigned char getBCC2(const unsigned char *buf, int bufSize) {
@@ -503,13 +515,13 @@ int byteStuffing(const unsigned char *input, int length, unsigned char *output) 
         if (input[i] == FLAG) {
             output[stuffedIndex++] = 0x7D;
             output[stuffedIndex++] = 0x5E;
-            printf("DEBUG (byteStuffing): FLAG detectado, aplicando stuffing -> 0x7D + 0x5E\n");
+            //printf("DEBUG (byteStuffing): FLAG detectado, aplicando stuffing -> 0x7D + 0x5E\n");
         } 
         
         else if (input[i] == 0x7D) {
             output[stuffedIndex++] = 0x7D;
             output[stuffedIndex++] = 0x5D;
-            printf("DEBUG (byteStuffing): 0x7D detectado, aplicando stuffing -> 0x7D + 0x5D\n");
+            //printf("DEBUG (byteStuffing): 0x7D detectado, aplicando stuffing -> 0x7D + 0x5D\n");
         } 
     
         else {
@@ -517,7 +529,7 @@ int byteStuffing(const unsigned char *input, int length, unsigned char *output) 
             //printf("DEBUG (byteStuffing): Byte sem alteração = 0x%X\n", input[i]);
         }
     }
-    printf("DEBUG (byteStuffing): Total de bytes adicionados no out buffer depois do stuffing = %d\n", stuffedIndex);
+    //printf("DEBUG (byteStuffing): Total de bytes adicionados no out buffer depois do stuffing = %d\n", stuffedIndex);
     return stuffedIndex;
 }
 
@@ -531,22 +543,22 @@ int byteDestuffing(const unsigned char *input, int length, unsigned char *output
         if (finded) {
             if (input[i] == 0x5E) {
                 output[destuffedIndex++] = FLAG;
-                printf("DEBUG (byteDestuffing): 0x7D seguido de 0x5E, convertendo para FLAG\n");
+                //printf("DEBUG (byteDestuffing): 0x7D seguido de 0x5E, convertendo para FLAG\n");
             } 
             else if (input[i] == 0x5D) {
                 output[destuffedIndex++] = 0x7D;
-                printf("DEBUG (byteDestuffing): 0x7D seguido de 0x5D, convertendo para 0x7D\n");
+                //printf("DEBUG (byteDestuffing): 0x7D seguido de 0x5D, convertendo para 0x7D\n");
             }
             finded = FALSE;
         } 
 
         else if (input[i] == 0x7D) {
             finded = TRUE;    
-            printf("DEBUG (byteDestuffing): Byte 0x7D detectado, aguardando próximo byte\n");
+            //printf("DEBUG (byteDestuffing): Byte 0x7D detectado, aguardando próximo byte\n");
         } 
 
         else if (input[i] == FLAG && i == length - 1) { 
-            printf("DEBUG (byteDestuffing): FLAG final detectado, parando processamento\n");
+            //printf("DEBUG (byteDestuffing): FLAG final detectado, parando processamento\n");
             break;
         } 
 
@@ -555,7 +567,7 @@ int byteDestuffing(const unsigned char *input, int length, unsigned char *output
             //printf("DEBUG (byteDestuffing): Byte sem alteração = 0x%X\n", input[i]);
         }
     }
-    printf("DEBUG (byteDestuffing): Tamanho final após destuffing = %d\n", destuffedIndex);
+    //printf("DEBUG (byteDestuffing): Tamanho final após destuffing = %d\n", destuffedIndex);
     return destuffedIndex;
 }
 
