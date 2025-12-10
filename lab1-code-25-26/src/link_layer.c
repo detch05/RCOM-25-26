@@ -346,7 +346,8 @@ int llread(unsigned char *packet)
         unsigned char BCC2 = getBCC2(packet, destuffedSize - 1);
 
         //Verifica o BCC2 para garantir integridade dos dados
-        if (BCC2 == packet[destuffedSize - 1]) {
+        if (BCC2 == packet[destuffedSize - 1]) 
+        {
             printf("DEBUG (llread): Frame recebido corretamente. Enviando RR...\n");
             if (errorControl == 0) {
                 sendSupervisionFrame(A_RECEIVER, C_RR0);
@@ -355,25 +356,25 @@ int llread(unsigned char *packet)
             }
             errorControl = (errorControl + 1) % 2;
             return destuffedSize - 1;
+        } else {
+            printf("DEBUG (llread): Erro: BCC2 incorreto. Enviando REJ...\n");
+            if (errorControl == 0) {
+                sendSupervisionFrame(A_RECEIVER, C_REJ0);
             } else {
-                printf("DEBUG (llread): Erro: BCC2 incorreto. Enviando REJ...\n");
-                if (errorControl == 0) {
-                    sendSupervisionFrame(A_RECEIVER, C_REJ0);
-                } else {
-                    sendSupervisionFrame(A_RECEIVER, C_REJ1);
-                }
-                tentativas++;
-                state = START;
-                frameIndex = 0;
+                sendSupervisionFrame(A_RECEIVER, C_REJ1);
             }
-        } else if (alarmEnabled) {
             tentativas++;
-            tentativas < retransmissions ? printf("DEBUG (llread): Tempo de espera esgotado, tentando outra vez...\n") :
-                printf("DEBUG (llread): Tentativas esgotadas\n");
-            
-            state = START;  
+            state = START;
             frameIndex = 0;
         }
+    } else if (alarmEnabled) {
+        tentativas++;
+        tentativas < retransmissions ? printf("DEBUG (llread): Tempo de espera esgotado, tentando outra vez...\n") :
+            printf("DEBUG (llread): Tentativas esgotadas\n");
+        
+        state = START;  
+        frameIndex = 0;
+    }
     }
 
     printf("DEBUG (llread): Não foi possivel receber o frame corretamente\n");
