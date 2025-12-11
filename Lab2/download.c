@@ -19,7 +19,6 @@ typedef struct URL {
 #define FTP_PORT 21
 
 int handle_URL(char *link, URL *url) {
-    // 1. Verificar prefixo "ftp://"
     const char *prefix = "ftp://";
     int prefix_len = strlen(prefix);
 
@@ -28,81 +27,78 @@ int handle_URL(char *link, URL *url) {
         return -1;
     }
 
-    // Avançar para depois de "ftp://"
     char *ptr = link + prefix_len;
 
-    // 2. Separar user e password → user:pass@
+    // Defaults
+    strcpy(url->name, "rcom");
+    strcpy(url->password, "rcom");
+
     char *at = strchr(ptr, '@');
-    if (!at) {
-        fprintf(stderr, "Erro: URL deve conter user e password (falta '@')\n");
-        return -1;
+    char *slash;
+
+    if (at) {
+        // USER:PASS@HOST/FILE
+        char userpass[128];
+        int up_len = at - ptr;
+        strncpy(userpass, ptr, up_len);
+        userpass[up_len] = '\0';
+
+        char *colon = strchr(userpass, ':');
+        if (!colon) {
+            fprintf(stderr, "Erro: falta ':' entre user e password\n");
+            return -1;
+        }
+
+        *colon = '\0';
+        char *user = userpass;
+        char *pass = colon + 1;
+
+        if (strlen(user) == 0 || strlen(pass) == 0) {
+            fprintf(stderr, "Erro: user ou password vazios\n");
+            return -1;
+        }
+
+        strncpy(url->name, user, sizeof(url->name));
+        strncpy(url->password, pass, sizeof(url->password));
+
+        ptr = at + 1;
     }
 
-    char userpass[128];
-    int up_len = at - ptr;
-    strncpy(userpass, ptr, up_len);
-    userpass[up_len] = '\0';
-
-    // Dividir user:pass
-    char *colon = strchr(userpass, ':');
-    if (!colon) {
-        fprintf(stderr, "Erro: falta ':' entre user e password\n");
-        return -1;
-    }
-
-    *colon = '\0';
-    char *user = userpass;
-    char *pass = colon + 1;
-
-    if (strlen(user) == 0 || strlen(pass) == 0) {
-        fprintf(stderr, "Erro: user ou password vazios\n");
-        return -1;
-    }
-
-    strncpy(url->name, user, sizeof(url->name));
-    strncpy(url->password, pass, sizeof(url->password));
-
-    // 3. Host e Path → host/path/file
-    ptr = at + 1;
-
-    // Procurar primeira '/'
-    char *slash = strchr(ptr, '/');
+    // Agora ptr aponta para HOST/FILE (com ou sem user/pass antes)
+    slash = strchr(ptr, '/');
     if (!slash) {
-        fprintf(stderr, "Erro: URL deve conter caminho e ficheiro (falta '/')\n");
+        fprintf(stderr, "Erro: falta caminho e ficheiro na URL\n");
         return -1;
     }
 
-    // Extrair host
+    // HOST
     int host_len = slash - ptr;
     if (host_len <= 0) {
         fprintf(stderr, "Erro: host inválido\n");
         return -1;
     }
-
+    
     strncpy(url->host, ptr, host_len);
     url->host[host_len] = '\0';
 
-    // 4. Extrair path + file
+    // PATH + FILE
     char *pathfile = slash + 1;
+
     if (strlen(pathfile) == 0) {
-        fprintf(stderr, "Erro: falta caminho/ficheiro\n");
+        fprintf(stderr, "Erro: falta ficheiro\n");
         return -1;
     }
 
-    // Encontrar último '/' → separa path do file
-    char *last_slash = strrchr(pathfile, '/');
-    if (!last_slash) {
-        // Não há diretórios, só ficheiro
+    char *last = strrchr(pathfile, '/');
+    if (!last) {
         url->path[0] = '\0';
         strncpy(url->file, pathfile, sizeof(url->file));
     } else {
-        // Path = tudo antes do último slash
-        int p_len = last_slash - pathfile;
-        strncpy(url->path, pathfile, p_len);
-        url->path[p_len] = '\0';
+        int plen = last - pathfile;
+        strncpy(url->path, pathfile, plen);
+        url->path[plen] = '\0';
 
-        // File = depois do slash final
-        strncpy(url->file, last_slash + 1, sizeof(url->file));
+        strncpy(url->file, last + 1, sizeof(url->file));
 
         if (strlen(url->file) == 0) {
             fprintf(stderr, "Erro: ficheiro vazio\n");
@@ -112,6 +108,7 @@ int handle_URL(char *link, URL *url) {
 
     return 0;
 }
+
 
 int create_socket(int *sockfd, char *ip, int port) {
 
