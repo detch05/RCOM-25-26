@@ -19,92 +19,59 @@ typedef struct URL {
 #define FTP_PORT 21
 
 int handle_URL(char *link, URL *url) {
-    const char *prefix = "ftp://";
-    int prefix_len = strlen(prefix);
+    char *input = link;
 
-    if (strncmp(link, prefix, prefix_len) != 0) {
-        fprintf(stderr, "Erro: URL deve começar com ftp://\n");
+    strcpy(url->name, "anonymous");
+    strcpy(url->password, "anonymous@");
+
+    if (strncmp(input, "ftp://", 6) != 0) {
+        printf("URL inválido\n");
         return -1;
     }
 
-    char *ptr = link + prefix_len;
+    input += 6;
 
-    // Defaults
-    strcpy(url->name, "rcom");
-    strcpy(url->password, "rcom");
+    char *arroba = strchr(input, '@');
+    char *slash  = strchr(input, '/');
 
-    char *at = strchr(ptr, '@');
-    char *slash;
+    if (slash == NULL) {
+        printf("URL inválido: falta /path\n");
+        return -1;
+    }
 
-    if (at) {
-        // USER:PASS@HOST/FILE
-        char userpass[128];
-        int up_len = at - ptr;
-        strncpy(userpass, ptr, up_len);
-        userpass[up_len] = '\0';
+    if (arroba != NULL && arroba < slash) {
+        char *doispontos = strchr(input, ':');
 
-        char *colon = strchr(userpass, ':');
-        if (!colon) {
-            fprintf(stderr, "Erro: falta ':' entre user e password\n");
+        if (doispontos == NULL || doispontos > arroba) {
+            printf("Formato user:password inválido\n");
             return -1;
         }
 
-        *colon = '\0';
-        char *user = userpass;
-        char *pass = colon + 1;
+        int user_len = doispontos - input;
+        strncpy(url->name, input, user_len);
+        url->name[user_len] = '\0';
 
-        if (strlen(user) == 0 || strlen(pass) == 0) {
-            fprintf(stderr, "Erro: user ou password vazios\n");
+        int pass_len = arroba - doispontos - 1;
+        strncpy(url->password, doispontos + 1, pass_len);
+        url->password[pass_len] = '\0';
+
+        input = arroba + 1;
+        slash = strchr(input, '/');
+        if (slash == NULL) {
+            printf("URL inválido\n");
             return -1;
         }
-
-        strncpy(url->name, user, sizeof(url->name));
-        strncpy(url->password, pass, sizeof(url->password));
-
-        ptr = at + 1;
     }
 
-    // Agora ptr aponta para HOST/FILE (com ou sem user/pass antes)
-    slash = strchr(ptr, '/');
-    if (!slash) {
-        fprintf(stderr, "Erro: falta caminho e ficheiro na URL\n");
-        return -1;
-    }
-
-    // HOST
-    int host_len = slash - ptr;
-    if (host_len <= 0) {
-        fprintf(stderr, "Erro: host inválido\n");
-        return -1;
-    }
-
-    strncpy(url->host, ptr, host_len);
+    int host_len = slash - input;
+    strncpy(url->host, input, host_len);
     url->host[host_len] = '\0';
 
-    // PATH + FILE
-    char *pathfile = slash + 1;
+    strcpy(url->path, slash + 1);
 
-    if (strlen(pathfile) == 0) {
-        fprintf(stderr, "Erro: falta ficheiro\n");
-        return -1;
-    }
-
-    char *last = strrchr(pathfile, '/');
-    if (!last) {
-        url->path[0] = '\0';
-        strncpy(url->file, pathfile, sizeof(url->file));
-    } else {
-        int plen = last - pathfile;
-        strncpy(url->path, pathfile, plen);
-        url->path[plen] = '\0';
-
-        strncpy(url->file, last + 1, sizeof(url->file));
-
-        if (strlen(url->file) == 0) {
-            fprintf(stderr, "Erro: ficheiro vazio\n");
-            return -1;
-        }
-    }
+    char *last = strrchr(url->path, '/');
+    if (last) strcpy(url->file, last + 1);
+    else      strcpy(url->file, url->path);
 
     return 0;
 }
@@ -277,12 +244,8 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
 
-    char retr_cmd[512];
-    if (strlen(url.path) > 0)
-        sprintf(retr_cmd, "RETR %s/%s\r\n", url.path, url.file);
-    else
-        sprintf(retr_cmd, "RETR %s\r\n", url.file);
-        
+    char retr_cmd[256];
+    sprintf(retr_cmd, "RETR %s\r\n", url.path);
     write(sockfd, retr_cmd, strlen(retr_cmd));
 
     size_t bytes_retr = read(sockfd, buf, sizeof(buf) - 1);
@@ -300,9 +263,10 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Downloading file: %s\n", url.file);
+
     while ((bytes_read = read(sockserver, buf, sizeof(buf))) > 0) {
         size_t bytes_written = fwrite(buf, 1, bytes_read, file);
-        if (bytes_written < bytes_read) {
+        if (bytes_written != bytes_read) {
             perror("Error writing to file");
             fclose(file);
             exit(-1);
@@ -310,6 +274,7 @@ int main(int argc, char *argv[]) {
     }
 
     fclose(file);
+    
     printf("%s downloaded successfully.\n", url.file);
 
     if (close(sockserver) < 0) {
