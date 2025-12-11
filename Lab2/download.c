@@ -77,7 +77,7 @@ int handle_URL(char *link, URL *url) {
         fprintf(stderr, "Erro: host inválido\n");
         return -1;
     }
-    
+
     strncpy(url->host, ptr, host_len);
     url->host[host_len] = '\0';
 
@@ -231,6 +231,10 @@ int main(int argc, char *argv[]) {
     char pass_cmd[256];
     sprintf(pass_cmd, "PASS %s\r\n", url.password);
     write(sockfd, pass_cmd, strlen(pass_cmd));
+
+    size_t bytes_pass = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_pass] = '\0';
+    printf("%s", buf);
     
     if (strncmp(buf, "230", 3) != 0) {
         printf("Error: Unexpected reply 230.\n");
