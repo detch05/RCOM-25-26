@@ -212,7 +212,7 @@ int main(int argc, char *argv[]) {
     printf("%s", buf);
 
     if (strncmp(buf, "220", 3) != 0) {
-        printf("Error: Unexpected reply from connection.\n");
+        printf("Error: Unexpected reply 220.\n");
         exit(-1);
     }
 
@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
     printf("%s", buf);
 
     if (strncmp(buf, "331", 3) != 0) {
-        printf("Error: Unexpected reply from connection.\n");
+        printf("Error: Unexpected reply 331.\n");
         exit(-1);
     }
 
@@ -236,7 +236,7 @@ int main(int argc, char *argv[]) {
     write(sockfd, pass_cmd, strlen(pass_cmd));
     
     if (strncmp(buf, "230", 3) != 0) {
-        printf("Error: Unexpected reply from connection.\n");
+        printf("Error: Unexpected reply 230.\n");
         exit(-1);
     }
 
@@ -253,7 +253,7 @@ int main(int argc, char *argv[]) {
     printf("%s", buf);
 
     if (strncmp(buf, "227", 3) != 0) {
-        printf("Error: Unexpected reply from connection.\n");
+        printf("Error: Unexpected reply 227.\n");
         exit(-1);
     }
 
