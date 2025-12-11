@@ -277,8 +277,12 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
 
-    char retr_cmd[256];
-    sprintf(retr_cmd, "RETR %s\r\n", url.path);
+    char retr_cmd[512];
+    if (strlen(url.path) > 0)
+        sprintf(retr_cmd, "RETR %s/%s\r\n", url.path, url.file);
+    else
+        sprintf(retr_cmd, "RETR %s\r\n", url.file);
+        
     write(sockfd, retr_cmd, strlen(retr_cmd));
 
     size_t bytes_retr = read(sockfd, buf, sizeof(buf) - 1);
