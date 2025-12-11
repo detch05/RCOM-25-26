@@ -138,6 +138,29 @@ int create_socket(int *sockfd, char *ip, int port) {
     return 0;
 }
 
+int parse_pasv(const char *buf, int *h1, int *h2, int *h3, int *h4, int *p1, int *p2) {
+    const char *start = strchr(buf, '(');
+    const char *end   = strchr(buf, ')');
+
+    if (!start || !end || end < start) {
+        fprintf(stderr, "Erro: formato PASV inválido\n");
+        return -1;
+    }
+
+    char inside[128];
+    int len = end - start - 1;
+    strncpy(inside, start + 1, len);
+    inside[len] = '\0';
+
+    // Agora inside contém: "h1,h2,h3,h4,p1,p2"
+    if (sscanf(inside, "%d,%d,%d,%d,%d,%d", h1, h2, h3, h4, p1, p2) != 6) {
+        fprintf(stderr, "Erro: não foi possível extrair valores PASV\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -178,10 +201,140 @@ int main(int argc, char *argv[]) {
         printf("Conection established to %s\n", url.host);
     }
 
+    usleep(1000000); // wait for 1 second to receive server welcome message
 
 
+    char buf[500];
 
 
+    size_t bytes_read = read(sockfd, buf, 500);
+    buf[bytes_read] = '\0';
+    printf("%s", buf);
+
+    if (strncmp(buf, "220", 3) != 0) {
+        printf("Error: Unexpected reply from connection.\n");
+        exit(-1);
+    }
+
+
+    // Login with USER and PASS
+    char user_cmd[256];
+    sprintf(user_cmd, "USER %s\r\n", url.name);
+    write(sockfd, user_cmd, strlen(user_cmd));
+
+    size_t bytes_user = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_user] = '\0';
+    printf("%s", buf);
+
+    if (strncmp(buf, "331", 3) != 0) {
+        printf("Error: Unexpected reply from connection.\n");
+        exit(-1);
+    }
+
+    char pass_cmd[256];
+    sprintf(pass_cmd, "PASS %s\r\n", url.password);
+    write(sockfd, pass_cmd, strlen(pass_cmd));
+    
+    if (strncmp(buf, "230", 3) != 0) {
+        printf("Error: Unexpected reply from connection.\n");
+        exit(-1);
+    }
+
+    printf("Logged in with USER: %s and PASS: %s.\n", url.name, url.password);
+
+    // ------------------------------------------
+
+    // Enter Passive Mode
+    char pasv_cmd[7] = "PASV\r\n";
+    write(sockfd, pasv_cmd, strlen(pasv_cmd));
+
+    size_t bytes_passive = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_passive] = '\0';
+    printf("%s", buf);
+
+    if (strncmp(buf, "227", 3) != 0) {
+        printf("Error: Unexpected reply from connection.\n");
+        exit(-1);
+    }
+
+    printf("Entered Passive Mode.\n");
+
+    int h1,h2,h3,h4,p1,p2;
+    parse_pasv(buf, &h1, &h2, &h3, &h4, &p1, &p2);
+
+    char ip_server[32];
+    sprintf(ip_server, "%d.%d.%d.%d", h1, h2, h3, h4);
+    int port_server = p1 * 256 + p2;
+
+    printf("Data Connection IP: %s Port: %d\n", ip_server, port_server);
+
+    // ------------------------------------------
+
+    int sockserver;
+    if (create_socket(&sockserver, ip_server, port_server) < 0) {
+        fprintf(stderr, "Error to create server socket\n");
+        exit(-1);
+    }
+
+    char retr_cmd[256];
+    sprintf(retr_cmd, "RETR %s\r\n", url.path);
+    write(sockfd, retr_cmd, strlen(retr_cmd));
+
+    size_t bytes_retr = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_retr] = '\0';
+
+    if (strncmp(buf, "125", 3) != 0 && strncmp(buf, "150", 3) != 0) {
+        printf("Error: expected reply 150 or 125.\n");
+        exit(-1);
+    }
+
+    FILE *file = fopen(url.file, "wb");
+    if (!file) {
+        perror("Error to create local file");
+        exit(-1);
+    }
+
+    printf("Downloading file: %s\n", url.file);
+    while ((bytes_read = read(sockserver, buf, sizeof(buf))) > 0) {
+        size_t bytes_written = fwrite(buf, 1, bytes_read, file);
+        if (bytes_written < bytes_read) {
+            perror("Error writing to file");
+            fclose(file);
+            exit(-1);
+        }
+    }
+
+    fclose(file);
+    printf("%s downloaded successfully.\n", url.file);
+
+    if (close(sockserver) < 0) {
+        perror("Error closing data socket");
+        exit(-1);
+    }
+
+    size_t bytes_final = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_final] = '\0';
+
+    if (strncmp(buf, "226", 3) != 0) {
+        printf("Error: expected reply 226.\n");
+        exit(-1);
+    }
+
+    char quit_cmd[7] = "QUIT\r\n";
+    write(sockfd, quit_cmd, strlen(quit_cmd));
+
+    if (strncmp(buf, "221", 3) != 0) {
+        printf("Error: Unexpected reply 221.\n");
+        exit(-1);
+    }
+
+    if (close(sockfd) < 0) {
+        perror("Error closing control socket");
+        exit(-1);
+    }
+
+    printf("Connection closed successfully.\n");
 
     return 0;
 }
+
