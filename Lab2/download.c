@@ -85,7 +85,7 @@ int create_socket(int *sockfd, char *ip, int port) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = inet_addr(ip); 
-    server_addr.sin_port = htons(FTP_PORT); 
+    server_addr.sin_port = htons(port); 
 
     if ((*sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("socket()");
@@ -265,8 +265,7 @@ int main(int argc, char *argv[]) {
     printf("Downloading file: %s\n", url.file);
 
     while ((bytes_read = read(sockserver, buf, sizeof(buf))) > 0) {
-        size_t bytes_written = fwrite(buf, 1, bytes_read, file);
-        if (bytes_written != bytes_read) {
+        if (fwrite(buf, 1, bytes_read, file) != bytes_read) {
             perror("Error writing to file");
             fclose(file);
             exit(-1);
@@ -292,6 +291,9 @@ int main(int argc, char *argv[]) {
 
     char quit_cmd[7] = "QUIT\r\n";
     write(sockfd, quit_cmd, strlen(quit_cmd));
+
+    bytes_final = read(sockfd, buf, sizeof(buf) - 1);
+    buf[bytes_final] = '\0';
 
     if (strncmp(buf, "221", 3) != 0) {
         printf("Error: Unexpected reply 221.\n");
