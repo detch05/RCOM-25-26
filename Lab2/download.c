@@ -216,13 +216,15 @@ int main(int argc, char *argv[]) {
     char pasv_cmd[7] = "PASV\r\n";
     write(sockfd, pasv_cmd, strlen(pasv_cmd));
 
-    size_t bytes_passive = read(sockfd, buf, sizeof(buf) - 1);
-    buf[bytes_passive] = '\0';
-    printf("%s", buf);
-
-    if (strncmp(buf, "227", 3) != 0) {
-        printf("Error: Unexpected reply 227.\n");
-        exit(-1);
+    int loop_227 = 0;
+    while(!loop_227) {
+        size_t bytes_passive = read(sockfd, buf, sizeof(buf) - 1);
+        buf[bytes_passive] = '\0';
+        printf("%s", buf);
+        if (strncmp(buf, "227", 3) == 0){
+            loop_227 = 1;
+            break;
+        }
     }
 
     printf("Entered Passive Mode.\n");
