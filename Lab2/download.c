@@ -267,7 +267,7 @@ int main(int argc, char *argv[]) {
     printf("Downloading file: %s\n", url.file);
 
     while ((bytes_read = read(sockserver, buf, sizeof(buf))) > 0) {
-        printf("Downloading %zu bytes...\n", bytes_read);
+        //printf("Downloading %zu bytes...\n", bytes_read);
         if (fwrite(buf, 1, bytes_read, file) != bytes_read) {
             perror("Error writing to file");
             fclose(file);
